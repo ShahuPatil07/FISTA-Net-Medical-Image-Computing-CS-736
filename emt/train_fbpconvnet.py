@@ -1,20 +1,3 @@
-"""
-emt/train_fbpconvnet.py
-=======================
-Train FBPConvNet (U-Net) on the pre-generated EMT dataset.
-
-For EMT, FBPConvNet takes the pre-computed initial estimate x0 (stored in
-the dataset) as input and refines it — analogous to post-processing the
-FBP reconstruction in CT.
-
-Usage
------
-    python emt/train_fbpconvnet.py
-    python emt/train_fbpconvnet.py --n_epochs 50 --lr_net 5e-5
-
-Saves to: emt/weights/fbpconvnet_emt_ep{epoch:03d}_psnr{psnr:.2f}.pth
-"""
-
 import argparse, sys, copy
 from pathlib import Path
 
@@ -58,7 +41,7 @@ def train(args):
         model.train(); ep_loss = 0.0
         for b, x0, x_gt in tqdm(train_loader, desc=f"Epoch {epoch}/{args.n_epochs}", leave=False):
             x0, x_gt = x0.to(device), x_gt.to(device)
-            pred = model(x0)   # refine the initial estimate
+            pred = model(x0)
             loss = F.mse_loss(pred, x_gt)
             optimizer.zero_grad(); loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), TRAIN["grad_clip"])

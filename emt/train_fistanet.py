@@ -1,17 +1,3 @@
-"""
-emt/train_fistanet.py
-=====================
-Train FISTA-Net on the pre-generated EMT dataset.
-
-Usage
------
-    python emt/train_fistanet.py
-    python emt/train_fistanet.py --n_epochs 50 --lr_net 5e-5
-
-Saves checkpoints to:
-    emt/weights/fistanet_emt_ep{epoch:03d}_psnr{psnr:.2f}.pth
-"""
-
 import argparse, sys, copy
 from pathlib import Path
 
@@ -53,7 +39,7 @@ def train(args):
         batch_size = args.batch_size,
     )
 
-    A_np     = load_sensitivity_matrix(EMT_DATASET_DIR)   # (64, 4096)
+    A_np     = load_sensitivity_matrix(EMT_DATASET_DIR)
     A_tensor = torch.tensor(A_np, dtype=torch.float32)
     print(f"A shape : {A_np.shape}")
 

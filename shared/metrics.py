@@ -1,26 +1,9 @@
-"""
-shared/metrics.py
-=================
-Evaluation metrics and table printing utilities used by both CT and EMT.
-"""
-
 import numpy as np
 from skimage.metrics import peak_signal_noise_ratio as _psnr
 from skimage.metrics import structural_similarity  as _ssim
 
 
 def compute_metrics(pred: np.ndarray, gt: np.ndarray) -> dict:
-    """
-    Compute PSNR, SSIM, RMSE for a batch or single image pair.
-
-    Parameters
-    ----------
-    pred, gt : numpy arrays of shape (H, W) or (B, H, W)
-
-    Returns
-    -------
-    {'PSNR': float, 'SSIM': float, 'RMSE': float}  — averaged over batch
-    """
     if pred.ndim == 2:
         pred = pred[np.newaxis]
         gt   = gt[np.newaxis]
@@ -44,15 +27,6 @@ def print_results_table(
     title: str = "Reconstruction Comparison",
     highlight: str = "FISTA-Net",
 ) -> None:
-    """
-    Print a paper-style comparison table.
-
-    Parameters
-    ----------
-    results   : {method_name: {'PSNR': list, 'SSIM': list, 'RMSE': list}}
-    title     : table header string
-    highlight : method name to mark with ◄ (proposed)
-    """
     sep = "═" * 72
     print(f"\n{sep}")
     print(f"  {title}")
@@ -75,7 +49,6 @@ def print_results_table(
 
 
 def save_results_csv(results: dict, path) -> None:
-    """Save per-sample metric arrays to a CSV file."""
     import csv
     from pathlib import Path
     path = Path(path)
@@ -104,7 +77,6 @@ def save_results_csv(results: dict, path) -> None:
 
 
 def save_results_summary_csv(results: dict, path) -> None:
-    """Save mean±std summary table to CSV."""
     import csv
     from pathlib import Path
     path = Path(path)

@@ -1,24 +1,9 @@
-"""
-ct/train_istanet.py
-===================
-Train ISTA-Net (no-momentum baseline) on Mayo Clinic sparse-view CT.
-
-Usage
------
-    python ct/train_istanet.py
-    python ct/train_istanet.py --n_epochs 20 --lr_net 5e-5
-
-Saves checkpoints to:
-    ct/weights/istanet_ct_ep{epoch:03d}_psnr{psnr:.2f}.pth
-"""
-
 import argparse, os, sys, copy
 from pathlib import Path
 
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))

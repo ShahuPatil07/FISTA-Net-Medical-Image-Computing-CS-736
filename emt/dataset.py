@@ -1,20 +1,3 @@
-"""
-emt/dataset.py
-==============
-Loads the pre-generated EMT dataset from .pt files in FISTA_Net_EMT_Dataset/.
-
-Each split contains three tensors:
-  measurements : (N, 64)        — noisy differential voltage measurements
-  x0           : (N, 1, 64, 64) — initial estimate (backprojection / Lap.Reg)
-  phantoms     : (N, 1, 64, 64) — ground-truth conductivity contrast images
-
-Usage
------
-    from emt.dataset import build_emt_loaders, load_sensitivity_matrix
-    train_loader, val_loader, test_loader = build_emt_loaders()
-    A = load_sensitivity_matrix()   # (64, 4096) pixel-space sensitivity matrix
-"""
-
 import sys
 from pathlib import Path
 
@@ -27,15 +10,6 @@ from config import EMT, EMT_DATASET_DIR
 
 
 class EMTDataset(Dataset):
-    """
-    Loads one split from the pre-generated FISTA_Net_EMT_Dataset .pt files.
-
-    Parameters
-    ----------
-    split    : "train" | "val" | "test1" | "test2"
-    data_dir : directory containing the .pt files (defaults to EMT_DATASET_DIR)
-    """
-
     _FILES = {
         "train": "train.pt",
         "val":   "val.pt",
@@ -53,9 +27,9 @@ class EMTDataset(Dataset):
             f"Expected pre-generated .pt files in {data_dir}"
         )
         data = torch.load(pt_path, map_location="cpu", weights_only=False)
-        self.meas     = data["measurements"]   # (N, 64)
-        self.x0       = data["x0"]             # (N, 1, 64, 64)
-        self.phantoms = data["phantoms"]       # (N, 1, 64, 64)
+        self.meas     = data["measurements"]
+        self.x0       = data["x0"]
+        self.phantoms = data["phantoms"]
 
         H = self.phantoms.shape[-1]
         print(f"EMTDataset [{split:5s}]: {len(self.meas):5d} samples | "
@@ -75,13 +49,6 @@ def build_emt_loaders(
     test_split:  str  = "test1",
     n_train:     int  = EMT.get("train_subset"),
 ):
-    """
-    Returns (train_loader, val_loader, test_loader).
-
-    test_split : "test1" or "test2"  (two different test conditions in the dataset)
-    n_train    : if set, uses only the first n_train training samples (val/test always full)
-    Each batch yields (measurements, x0, phantoms).
-    """
     train_ds = EMTDataset("train", data_dir)
     if n_train is not None and n_train < len(train_ds):
         train_ds = Subset(train_ds, range(n_train))
@@ -101,20 +68,12 @@ def build_emt_loaders(
 
 
 def load_sensitivity_matrix(data_dir: Path = EMT_DATASET_DIR) -> np.ndarray:
-    """
-    Load the pixel-space sensitivity matrix A.
-    Shape: (64, 4096)  —  64 measurements × 4096 pixels (64×64 image flattened).
-    """
     path = Path(data_dir) / "sensitivity_matrix_A.npy"
     assert path.exists(), f"sensitivity_matrix_A.npy not found in {data_dir}"
     return np.load(path)
 
 
 def load_laplacian(data_dir: Path = EMT_DATASET_DIR) -> np.ndarray:
-    """
-    Load the pre-computed Laplacian regularization matrix L.
-    Shape: (4096, 4096).
-    """
     path = Path(data_dir) / "laplacian_matrix_L.npy"
     assert path.exists(), f"laplacian_matrix_L.npy not found in {data_dir}"
     return np.load(path)

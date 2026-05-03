@@ -1,12 +1,3 @@
-"""
-emt/baselines.py
-================
-Classical (non-learned) EMT reconstruction baselines.
-
-laplacian_regularization  — closed-form Tikhonov/Laplacian reg solution
-fista_tv_emt              — iterative TV minimisation with explicit A matrix
-"""
-
 import math
 import numpy as np
 
@@ -22,21 +13,6 @@ def laplacian_regularization(
     L:   np.ndarray,
     lam: float = CLASSICAL["lap_reg_lam"],
 ) -> np.ndarray:
-    """
-    Solve:  min ||Ax - b||² + lam * ||Lx||²
-    Closed-form:  x* = (AᵀA + lam LᵀL)⁻¹ Aᵀb
-
-    Parameters
-    ----------
-    b   : (M,)     measurement vector
-    A   : (M, N)   sensitivity matrix  (N = img_size²)
-    L   : (N, N)   pre-computed Laplacian matrix
-    lam : regularisation weight
-
-    Returns
-    -------
-    x : (sqrt(N), sqrt(N)) float32
-    """
     n = int(round(A.shape[1] ** 0.5))
     return np.linalg.solve(
         A.T @ A + lam * L.T @ L,
@@ -51,22 +27,6 @@ def fista_tv_emt(
     n_iters: int   = CLASSICAL["fista_tv_emt_iters"],
     lam:     float = CLASSICAL["fista_tv_emt_lam"],
 ) -> np.ndarray:
-    """
-    TV-regularised reconstruction for EMT (explicit A matrix).
-    Uses FISTA with isotropic TV proximal step.
-
-    Parameters
-    ----------
-    b       : (M,)         measurement vector
-    A       : (M, N)       sensitivity matrix
-    x0      : (H, W)       initial image (e.g. from Laplacian reg)
-    n_iters : FISTA iterations
-    lam     : TV weight
-
-    Returns
-    -------
-    x : (H, W) float32
-    """
     H, W = x0.shape
     L_lip = np.linalg.norm(A, ord=2) ** 2 + 1e-6
     mu    = 1.0 / L_lip
@@ -77,7 +37,6 @@ def fista_tv_emt(
         r   = y - mu * (A.T @ (A @ y - b.astype(np.float64)))
         r2d = r.reshape(H, W)
 
-        # Isotropic TV proximal
         dx  = np.diff(r2d, axis=1, append=r2d[:, -1:])
         dy  = np.diff(r2d, axis=0, append=r2d[-1:, :])
         mag = np.sqrt(dx ** 2 + dy ** 2 + 1e-8)

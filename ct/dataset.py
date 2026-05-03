@@ -1,24 +1,3 @@
-"""
-ct/dataset.py
-=============
-Two dataset modes — use whichever fits your setup:
-
-  BoxCTDataset      — streams individual .IMA files from the Box zip via HTTP
-                      range requests.  No full download.  Only fetches the
-                      slices you configure (slices_per_patient).  Caches them
-                      to  ct_cache/slices/  so subsequent epochs read from disk.
-
-  MayoCTDataset     — reads .IMA files that are already on disk (local or
-                      cloud-mounted drive).  Use this if you have the data
-                      extracted somewhere already.
-
-build_ct_loaders()  — convenience wrapper; pass box_token to use Box streaming,
-                      omit it (or pass None) to read from data_root on disk.
-
-RadonOperator       — batched CPU numpy radon / iradon (skimage), used in the
-                      training loops in place of an explicit A matrix.
-"""
-
 import io, struct, zipfile
 from pathlib import Path
 
@@ -34,26 +13,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import CT, CT_DATA_DIR
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Box constants  (public AAPM shared link)
-# ─────────────────────────────────────────────────────────────────────────────
 _BOX_SHARED_LINK = "https://aapm.app.box.com/s/eaw4jddb53keg1bptavvvd1sf4x3pe9h"
-_BOX_FILE_ID     = "856956352254"   # full_3mm.zip inside Training_Image_Data/3mm B30
+_BOX_FILE_ID     = "856956352254"
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Seekable HTTP stream  (lets zipfile read ranges from a remote zip)
-# ─────────────────────────────────────────────────────────────────────────────
 
 class _BoxSeekableStream(io.RawIOBase):
-    """
-    Wraps HTTP range-request GET calls so that Python's zipfile module can
-    seek inside a remote zip without downloading the whole file.
-
-    Box returns a 302 redirect for file content — this class follows it once
-    and then issues Range: bytes=X-Y requests against the CDN URL.
-    """
-
     def __init__(self, box_token: str):
         super().__init__()
         self._token = box_token
@@ -77,8 +41,6 @@ class _BoxSeekableStream(io.RawIOBase):
             return resp.headers["Location"], {}
         resp.raise_for_status()
         return resp.url, headers
-
-    # ── io.RawIOBase interface ────────────────────────────────────────────────
 
     def readable(self):  return True
     def seekable(self):  return True
@@ -111,10 +73,6 @@ class _BoxSeekableStream(io.RawIOBase):
         return n_read
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Shared DICOM helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
 def load_ima_file(path: Path) -> np.ndarray:
     ds        = pydicom.dcmread(str(path))
     img       = ds.pixel_array.astype(np.float32)
@@ -136,28 +94,7 @@ def make_sparse_sinogram(img: np.ndarray, n_views: int):
     return sinogram, fbp_init
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Box streaming dataset  ← DEFAULT when box_token is provided
-# ─────────────────────────────────────────────────────────────────────────────
-
 class BoxCTDataset(Dataset):
-    """
-    Fetches ONLY the needed .IMA slices from the Box zip via HTTP range
-    requests — no full zip download.  On first use it caches the individual
-    DICOM files to  ct_cache/slices/  so subsequent epochs run entirely
-    from local disk.
-
-    Parameters
-    ----------
-    box_token          : Box developer token (regenerate every 60 min at
-                         developer.box.com if it hasn't been cached yet).
-    patients           : list of patient IDs, e.g. ["L067", "L096"]
-    slices_per_patient : how many slices to use per patient (None = all)
-    n_views            : number of Radon projection angles
-    patch_size         : random crop size during training (None = full slice)
-    cache_dir          : where to store the cached individual .IMA files
-    """
-
     def __init__(
         self,
         box_token:          str  = None,
@@ -185,7 +122,6 @@ class BoxCTDataset(Dataset):
             cache_dir = Path(__file__).parent.parent / "ct_cache" / "slices"
         cache_dir = Path(cache_dir)
 
-        # Check how many files we still need to fetch
         all_cached = True
         needed = {}
         for pid in patients:
@@ -255,23 +191,7 @@ class BoxCTDataset(Dataset):
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Local-disk dataset  (use when data is already extracted somewhere)
-# ─────────────────────────────────────────────────────────────────────────────
-
 class MayoCTDataset(Dataset):
-    """
-    Reads .IMA DICOM slices from a local (or cloud-mounted) directory.
-
-    Parameters
-    ----------
-    data_root          : root directory (CT_DATA_DIR from config, or any path)
-    patients           : list of patient IDs
-    n_views            : number of projection angles
-    slices_per_patient : int or None  (None = use all)
-    patch_size         : int or None  (None = use full 512×512 slice)
-    """
-
     def __init__(
         self,
         data_root:          Path = CT_DATA_DIR,
@@ -319,10 +239,6 @@ class MayoCTDataset(Dataset):
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Convenience loader builder
-# ─────────────────────────────────────────────────────────────────────────────
-
 def build_ct_loaders(
     box_token:   str  = None,
     data_root:   Path = CT_DATA_DIR,
@@ -331,12 +247,6 @@ def build_ct_loaders(
     batch_size:  int  = CT["batch_size"],
     num_workers: int  = CT["num_workers"],
 ):
-    """
-    Returns (train_loader, val_loader, test_loader).
-
-    box_token: if None, auto-reads CT["box_token"] from config.py.
-    If config token is also empty, falls back to MayoCTDataset (local disk).
-    """
     if box_token is None:
         box_token = CT["box_token"] or None
 
@@ -368,17 +278,7 @@ def build_ct_loaders(
     return train_loader, val_loader, test_loader
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Radon Operator  (CPU numpy — batched, used inside training loops)
-# ─────────────────────────────────────────────────────────────────────────────
-
 class RadonOperator:
-    """
-    Thin wrapper around skimage radon / iradon for batched use.
-    All tensors are detached to CPU — the Radon step has no gradient;
-    only μ, θ, ρ and ProxNet weights are differentiated.
-    """
-
     def __init__(self, image_size: int = 128, n_views: int = CT["n_views"]):
         self.angles     = np.linspace(0.0, 180.0, n_views, endpoint=False)
         self.image_size = image_size

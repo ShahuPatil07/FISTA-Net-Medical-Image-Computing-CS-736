@@ -1,18 +1,3 @@
-"""
-ct/train_fbpconvnet.py
-======================
-Train FBPConvNet (U-Net post-processor) on Mayo Clinic sparse-view CT.
-Input: FBP reconstruction.  Target: ground-truth full-dose image.
-
-Usage
------
-    python ct/train_fbpconvnet.py
-    python ct/train_fbpconvnet.py --n_epochs 20 --lr 5e-5
-
-Saves checkpoints to:
-    ct/weights/fbpconvnet_ct_ep{epoch:03d}_psnr{psnr:.2f}.pth
-"""
-
 import argparse, os, sys, copy
 from pathlib import Path
 

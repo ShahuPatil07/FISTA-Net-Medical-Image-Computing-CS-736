@@ -1,18 +1,3 @@
-"""
-ct/train_fistanet.py
-====================
-Train FISTA-Net on the Mayo Clinic sparse-view CT dataset.
-
-Usage
------
-    python ct/train_fistanet.py                          # use config.py defaults
-    python ct/train_fistanet.py --n_epochs 20            # override epochs
-    python ct/train_fistanet.py --n_epochs 20 --lr_net 5e-5 --patch_size 64
-
-Saves checkpoints to:
-    ct/weights/fistanet_ct_ep{epoch:03d}_psnr{psnr:.2f}.pth
-"""
-
 import argparse, os, sys, copy
 from pathlib import Path
 
@@ -30,13 +15,8 @@ from shared.models   import FISTANet
 from shared.metrics  import compute_metrics
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Loss  (Eq. 14 of paper)
-# ─────────────────────────────────────────────────────────────────────────────
-
 def fista_net_loss(x_final, intermediates, x_gt, prox_net,
                    lambda1=TRAIN["lambda1"], lambda2=TRAIN["lambda2"]):
-    """L_total = L_mse + λ1·L_sym + λ2·L_spa"""
     L_mse = F.mse_loss(x_final, x_gt)
     L_sym = L_spa = torch.tensor(0.0, device=x_final.device)
     for x_k, z_k in intermediates:
@@ -46,12 +26,7 @@ def fista_net_loss(x_final, intermediates, x_gt, prox_net,
     return L_mse + lambda1 * L_sym / n + lambda2 * L_spa / n, L_mse, L_sym / n, L_spa / n
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Single epoch — inference helper (used by val loop and callers)
-# ─────────────────────────────────────────────────────────────────────────────
-
 def run_fista_ct(model, fbp, sino, radon_op, device):
-    """Forward pass using RadonOperator (CT-specific)."""
     fbp    = fbp.to(device)
     sino   = sino.to(device)
     x_prev = y = fbp
@@ -69,10 +44,6 @@ def run_fista_ct(model, fbp, sino, radon_op, device):
     return x, ints
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Training loop
-# ─────────────────────────────────────────────────────────────────────────────
-
 def train(args):
     device      = DEVICE
     weights_dir = CT_WEIGHTS_DIR
@@ -87,7 +58,6 @@ def train(args):
     print(f"Epochs       : {args.n_epochs}")
     print(f"LR net/params: {args.lr_net} / {args.lr_params}")
 
-    # ── Data ──────────────────────────────────────────────────────────────────
     token = args.box_token or CT["box_token"] or None
     train_loader, val_loader, _ = build_ct_loaders(
         box_token   = token,
@@ -98,14 +68,12 @@ def train(args):
         num_workers = CT["num_workers"],
     )
 
-    # ── Model ─────────────────────────────────────────────────────────────────
     os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
     torch.cuda.empty_cache()
     model = FISTANet(torch.eye(1), n_stages=FISTA_NET["n_stages"],
                      n_filters=FISTA_NET["n_filters"], image_size=eff_size).to(device)
     print(f"FISTA-Net params: {model.n_parameters():,}")
 
-    # ── Optimiser  (two param groups: network vs scalar params) ───────────────
     optimizer = torch.optim.Adam([
         {"params": list(model.prox_net.parameters()), "lr": args.lr_net},
         {"params": [model.w1, model.c1, model.w2, model.c2, model.w3, model.c3],
@@ -117,7 +85,6 @@ def train(args):
     best_state = None
 
     for epoch in range(1, args.n_epochs + 1):
-        # ── Train ─────────────────────────────────────────────────────────────
         model.train()
         ep_loss = 0.0
         for fbp, sino, gt in tqdm(train_loader, desc=f"Epoch {epoch}/{args.n_epochs}", leave=False):
@@ -131,7 +98,6 @@ def train(args):
             optimizer.step()
             ep_loss += loss.item()
 
-        # ── Validate ──────────────────────────────────────────────────────────
         model.eval()
         val_psnrs = []
         with torch.no_grad():
@@ -151,14 +117,12 @@ def train(args):
             best_psnr  = avg_vp
             best_state = copy.deepcopy(model.state_dict())
 
-        # ── Checkpoint ────────────────────────────────────────────────────────
         if epoch % TRAIN["save_every"] == 0 or epoch == args.n_epochs:
             ckpt = weights_dir / weight_name("fistanet", "ct", epoch, avg_vp)
             torch.save({"epoch": epoch, "state_dict": model.state_dict(),
                         "val_psnr": avg_vp, "history": history}, ckpt)
             print(f"  Saved checkpoint → {ckpt.name}")
 
-    # ── Save best ─────────────────────────────────────────────────────────────
     model.load_state_dict(best_state)
     best_ckpt = weights_dir / weight_name("fistanet", "ct", args.n_epochs, best_psnr)
     torch.save({"epoch": args.n_epochs, "state_dict": model.state_dict(),
@@ -167,10 +131,6 @@ def train(args):
     print(f"Best weights   → {best_ckpt}")
     return model, history
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CLI
-# ─────────────────────────────────────────────────────────────────────────────
 
 def parse_args():
     p = argparse.ArgumentParser(description="Train FISTA-Net on Mayo Clinic CT")

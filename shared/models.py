@@ -1,16 +1,3 @@
-"""
-shared/models.py
-================
-All neural network architectures used by both CT and EMT pipelines.
-
-Classes
--------
-ProximalMappingNetwork  : 4-layer CNN proximal operator (shared across stages)
-FISTANet                : Unrolled FISTA with learned μ, θ, ρ  (paper Section III)
-ISTANet                 : Unrolled ISTA baseline (no momentum)
-FBPConvNet              : U-Net post-processor applied to FBP/initial reconstruction
-"""
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -21,23 +8,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import FISTA_NET, ISTA_NET, FBPCONVNET
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Proximal Mapping Network  (shared across all FISTA-Net / ISTA-Net stages)
-# ─────────────────────────────────────────────────────────────────────────────
-
 class ProximalMappingNetwork(nn.Module):
-    """
-    4-layer encoder + 4-layer decoder with skip connection.
-    Encoder  F  : [Conv3×3 + ReLU] × 4
-    Decoder  F† : [Conv3×3 + ReLU] × 3 + Conv3×3   (no BN — paper Section III-B)
-    Forward  : x_out, z  where z is the latent after soft-thresholding.
-    Weights are shared across all unrolling stages; only threshold θ varies.
-    """
     def __init__(self, n_filters: int = 32):
         super().__init__()
         Nf = n_filters
         self.encoder = nn.Sequential(
-            nn.Conv2d(1,  Nf, 3, padding=1, bias=False),                           # conv_D: projection, no activation
+            nn.Conv2d(1,  Nf, 3, padding=1, bias=False),
             nn.Conv2d(Nf, Nf, 3, padding=1, bias=False), nn.ReLU(inplace=True),
             nn.Conv2d(Nf, Nf, 3, padding=1, bias=False), nn.ReLU(inplace=True),
             nn.Conv2d(Nf, Nf, 3, padding=1, bias=False), nn.ReLU(inplace=True),
@@ -56,38 +32,13 @@ class ProximalMappingNetwork(nn.Module):
         return self.decoder(z)
 
     def forward(self, r: torch.Tensor, theta: torch.Tensor):
-        """
-        Parameters
-        ----------
-        r     : B×1×H×W  gradient-step residual
-        theta : scalar tensor  (learned threshold for this stage)
-
-        Returns
-        -------
-        x_out : B×1×H×W  proximal output  (with skip connection)
-        z     : B×Nf×H×W latent features  (used in L_spa loss)
-        """
         z        = self.encode(r)
-        z_thresh = F.relu(z - theta) - F.relu(-z - theta)   # soft-threshold
-        x_out    = F.relu(self.decode(z_thresh) + r)         # skip + non-negativity
-        return x_out, z_thresh                               # post-threshold z for L_spa
+        z_thresh = F.relu(z - theta) - F.relu(-z - theta)
+        x_out    = F.relu(self.decode(z_thresh) + r)
+        return x_out, z_thresh
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# FISTA-Net  (proposed method — Section III)
-# ─────────────────────────────────────────────────────────────────────────────
 
 class FISTANet(nn.Module):
-    """
-    Unrolled FISTA with learned step-size μ_k, threshold θ_k, momentum ρ_k.
-
-    All three scalar schedules are parameterised as monotone functions of
-    stage index k via learnable affine + softplus transforms (Section III-C).
-
-    For CT:  the A matrix is a dummy 1×1 eye — forward/adjoint go through
-             RadonOperator in the training loop.
-    For EMT: the explicit sensitivity matrix A is passed here.
-    """
     def __init__(
         self,
         A_matrix:   torch.Tensor,
@@ -104,7 +55,6 @@ class FISTANet(nn.Module):
 
         self.prox_net = ProximalMappingNetwork(n_filters)
 
-        # Learnable scalars (initialised from config / paper Section III-C)
         self.w1 = nn.Parameter(torch.tensor(FISTA_NET["init_w1"]))
         self.c1 = nn.Parameter(torch.tensor(FISTA_NET["init_c1"]))
         self.w2 = nn.Parameter(torch.tensor(FISTA_NET["init_w2"]))
@@ -112,7 +62,6 @@ class FISTANet(nn.Module):
         self.w3 = nn.Parameter(torch.tensor(FISTA_NET["init_w3"]))
         self.c3 = nn.Parameter(torch.tensor(FISTA_NET["init_c3"]))
 
-    # ------------------------------------------------------------------
     @staticmethod
     def _compute_W_tilde(A: torch.Tensor) -> torch.Tensor:
         return A.float().T
@@ -128,22 +77,7 @@ class FISTANet(nn.Module):
         num = F.softplus(w3 * k + self.c3) - F.softplus(w3 + self.c3)
         return (num / F.softplus(w3 * k + self.c3).clamp(1e-8)).clamp(0, 1)
 
-    # ------------------------------------------------------------------
     def forward(self, b: torch.Tensor, x0: torch.Tensor):
-        """
-        EMT forward pass — uses explicit A matrix.
-        For CT use the CT training loop which calls prox_net + RadonOperator directly.
-
-        Parameters
-        ----------
-        b  : B×M measurements
-        x0 : B×1×H×W initial estimate (zeros or FBP)
-
-        Returns
-        -------
-        x     : final reconstruction  B×1×H×W
-        ints  : list of (x_k, z_k) per stage  (needed for loss)
-        """
         B, _, H, W = x0.shape
         N          = H * W
         x_prev     = x0
@@ -163,7 +97,6 @@ class FISTANet(nn.Module):
 
         return x, ints
 
-    # ------------------------------------------------------------------
     def get_learned_params(self):
         mus, thetas, rhos = [], [], []
         with torch.no_grad():
@@ -177,15 +110,7 @@ class FISTANet(nn.Module):
         return sum(p.numel() for p in self.parameters())
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ISTA-Net  (baseline — unrolled ISTA, no momentum)
-# ─────────────────────────────────────────────────────────────────────────────
-
 class ISTANet(nn.Module):
-    """
-    ISTA-Net baseline: same proximal network as FISTANet but without the
-    momentum term.  Each stage has its own scalar μ_k and θ_k.
-    """
     def __init__(
         self,
         A_matrix:   torch.Tensor,
@@ -220,10 +145,6 @@ class ISTANet(nn.Module):
         return sum(p.numel() for p in self.parameters())
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# FBPConvNet  (U-Net post-processor baseline)
-# ─────────────────────────────────────────────────────────────────────────────
-
 class _UNetBlock(nn.Module):
     def __init__(self, ic: int, oc: int):
         super().__init__()
@@ -235,10 +156,6 @@ class _UNetBlock(nn.Module):
 
 
 class FBPConvNet(nn.Module):
-    """
-    U-Net that post-processes a filtered back-projection (or any initial
-    reconstruction) image.  Residual output: pred = UNet(fbp) + fbp.
-    """
     def __init__(self, base_ch: int = FBPCONVNET["base_ch"]):
         super().__init__()
         b          = base_ch
@@ -268,7 +185,7 @@ class FBPConvNet(nn.Module):
         d  = self.d3(torch.cat([self.u3(d), e3], dim=1))
         d  = self.d2(torch.cat([self.u2(d), e2], dim=1))
         d  = self.d1(torch.cat([self.u1(d), e1], dim=1))
-        return self.out(d) + x   # residual
+        return self.out(d) + x
 
     def n_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters())

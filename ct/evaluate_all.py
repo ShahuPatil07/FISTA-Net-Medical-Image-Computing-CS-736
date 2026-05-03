@@ -1,21 +1,3 @@
-"""
-ct/evaluate_all.py
-==================
-Load saved model weights and evaluate ALL methods on the CT test set.
-Saves tables (CSV) and figures (PNG) to ct/results/.
-
-This script requires that you have already trained the three deep models:
-    fistanet_ct_ep*_psnr*.pth
-    istanet_ct_ep*_psnr*.pth
-    fbpconvnet_ct_ep*_psnr*.pth
-
-Usage
------
-    python ct/evaluate_all.py                         # auto-selects best checkpoints
-    python ct/evaluate_all.py --fista path/to/ckpt.pth --ista ...  --fbpc ...
-    python ct/evaluate_all.py --n_display 4 --fista_tv_iters 100
-"""
-
 import argparse, sys, os, copy
 from pathlib import Path
 
@@ -38,12 +20,7 @@ from shared.metrics  import (compute_metrics, print_results_table,
                               save_results_csv, save_results_summary_csv)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Checkpoint helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
 def find_best_checkpoint(weights_dir: Path, prefix: str) -> Path:
-    """Find the checkpoint with highest PSNR for a given model prefix."""
     candidates = sorted(weights_dir.glob(f"{prefix}_ct_*.pth"))
     if not candidates:
         script = {"fistanet": "train_fistanet", "istanet": "train_istanet",
@@ -52,7 +29,6 @@ def find_best_checkpoint(weights_dir: Path, prefix: str) -> Path:
             f"No checkpoint found for '{prefix}' in {weights_dir}.\n"
             f"Run  python ct/{script}.py  first."
         )
-    # Parse psnr from filename: {model}_ct_ep{epoch}_psnr{xx.xx}.pth
     def psnr_from_name(p: Path) -> float:
         try:
             return float(p.stem.split("_psnr")[-1])
@@ -89,15 +65,8 @@ def load_fbpconvnet(ckpt_path: Path, device: str) -> FBPConvNet:
     return model
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Evaluation
-# ─────────────────────────────────────────────────────────────────────────────
-
 def evaluate_all(fista_model, ista_model, fbpc_model, radon_op,
                  test_loader, angles, args, device):
-    """
-    Returns results dict:  method → {'PSNR': [], 'SSIM': [], 'RMSE': []}
-    """
     methods = ["FBP", "FISTA-TV", "ISTA-Net", "FBPConvNet", "FISTA-Net"]
     res     = {m: {"PSNR": [], "SSIM": [], "RMSE": []} for m in methods}
 
@@ -106,13 +75,11 @@ def evaluate_all(fista_model, ista_model, fbpc_model, radon_op,
         sino_np = sino.squeeze(1).numpy()
         gt_np   = gt.squeeze(1).numpy()
 
-        # FBP ──────────────────────────────────────────────────────────────────
         for p, g in zip(fbp_np, gt_np):
             m = compute_metrics(p, g)
             for k in ("PSNR", "SSIM", "RMSE"):
                 res["FBP"][k].append(m[k])
 
-        # FISTA-TV ─────────────────────────────────────────────────────────────
         for p_fbp, s_np, g in zip(fbp_np, sino_np, gt_np):
             tv = fista_tv_ct(p_fbp, s_np, angles,
                              n_iters=args.fista_tv_iters,
@@ -122,7 +89,6 @@ def evaluate_all(fista_model, ista_model, fbpc_model, radon_op,
             for k in ("PSNR", "SSIM", "RMSE"):
                 res["FISTA-TV"][k].append(m[k])
 
-        # ISTA-Net ─────────────────────────────────────────────────────────────
         with torch.no_grad():
             x_ista, _ = run_ista_ct(ista_model, fbp, sino, radon_op, device)
         for p, g in zip(x_ista.squeeze(1).cpu().numpy(), gt_np):
@@ -130,7 +96,6 @@ def evaluate_all(fista_model, ista_model, fbpc_model, radon_op,
             for k in ("PSNR", "SSIM", "RMSE"):
                 res["ISTA-Net"][k].append(m[k])
 
-        # FBPConvNet ───────────────────────────────────────────────────────────
         with torch.no_grad():
             fbpc_pred = fbpc_model(fbp.to(device)).squeeze(1).cpu().numpy()
         for p, g in zip(fbpc_pred, gt_np):
@@ -138,7 +103,6 @@ def evaluate_all(fista_model, ista_model, fbpc_model, radon_op,
             for k in ("PSNR", "SSIM", "RMSE"):
                 res["FBPConvNet"][k].append(m[k])
 
-        # FISTA-Net ────────────────────────────────────────────────────────────
         with torch.no_grad():
             x_fista, _ = run_fista_ct(fista_model, fbp, sino, radon_op, device)
         for p, g in zip(x_fista.squeeze(1).cpu().numpy(), gt_np):
@@ -148,10 +112,6 @@ def evaluate_all(fista_model, ista_model, fbpc_model, radon_op,
 
     return res
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Figures
-# ─────────────────────────────────────────────────────────────────────────────
 
 def save_comparison_figure(display_rows, save_path):
     methods = ["FBP", "FISTA-TV", "ISTA-Net", "FBPConvNet", "FISTA-Net", "GT"]
@@ -268,17 +228,12 @@ def save_learned_params_figure(fista_model, save_path):
     print(f"Saved → {save_path}")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Main
-# ─────────────────────────────────────────────────────────────────────────────
-
 def run(args):
     device = DEVICE
     CT_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     (CT_RESULTS_DIR / "figures").mkdir(exist_ok=True)
     (CT_RESULTS_DIR / "tables").mkdir(exist_ok=True)
 
-    # ── Test loader (full slices, batch=1) ────────────────────────────────────
     token = args.box_token or CT["box_token"] or None
     _, _, test_loader = build_ct_loaders(
         box_token  = token,
@@ -288,13 +243,11 @@ def run(args):
         batch_size = 1,
     )
 
-    # Effective image size from first test batch
     fbp0, _, _ = next(iter(test_loader))
     eff_size   = fbp0.shape[-1]
     angles     = np.linspace(0.0, 180.0, args.n_views, endpoint=False)
     radon_op   = RadonOperator(image_size=eff_size, n_views=args.n_views)
 
-    # ── Load checkpoints ──────────────────────────────────────────────────────
     print("\nLoading model checkpoints …")
     fista_ckpt = Path(args.fista) if args.fista else find_best_checkpoint(CT_WEIGHTS_DIR, "fistanet")
     ista_ckpt  = Path(args.ista)  if args.ista  else find_best_checkpoint(CT_WEIGHTS_DIR, "istanet")
@@ -304,19 +257,15 @@ def run(args):
     ista_model  = load_istanet( ista_ckpt,  eff_size, device)
     fbpc_model  = load_fbpconvnet(fbpc_ckpt, device)
 
-    # ── Evaluate ──────────────────────────────────────────────────────────────
     print("\nRunning evaluation …")
     results = evaluate_all(fista_model, ista_model, fbpc_model,
                            radon_op, test_loader, angles, args, device)
 
-    # ── Print table ───────────────────────────────────────────────────────────
     print_results_table(results, title=f"CT Sparse-View Reconstruction ({args.n_views} views, Mayo Clinic)")
 
-    # ── Save tables ───────────────────────────────────────────────────────────
     save_results_csv(results,         CT_RESULTS_DIR / "tables" / "ct_per_sample.csv")
     save_results_summary_csv(results, CT_RESULTS_DIR / "tables" / "ct_summary.csv")
 
-    # ── Collect display samples ───────────────────────────────────────────────
     display_rows = []
     with torch.no_grad():
         for fbp, sino, gt in test_loader:
@@ -350,14 +299,12 @@ def run(args):
                 }
                 display_rows.append(row)
 
-    # ── Save figures ──────────────────────────────────────────────────────────
     fig_dir = CT_RESULTS_DIR / "figures"
     save_comparison_figure(display_rows, fig_dir / "ct_comparison_all_methods.png")
     save_error_map_figure( display_rows, fig_dir / "ct_error_maps.png")
     save_bar_chart(results,              fig_dir / "ct_metrics_barchart.png")
     save_learned_params_figure(fista_model, fig_dir / "ct_learned_params.png")
 
-    # ── Final summary ─────────────────────────────────────────────────────────
     means = {m: {k: float(np.mean(v)) for k, v in mets.items()} for m, mets in results.items()}
     best_psnr_m = max(means, key=lambda m: means[m]["PSNR"])
     delta = means["FISTA-Net"]["PSNR"] - means["FBP"]["PSNR"]

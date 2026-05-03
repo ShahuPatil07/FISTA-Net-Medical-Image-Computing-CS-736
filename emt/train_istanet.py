@@ -1,16 +1,3 @@
-"""
-emt/train_istanet.py
-====================
-Train ISTA-Net (no-momentum baseline) on the pre-generated EMT dataset.
-
-Usage
------
-    python emt/train_istanet.py
-    python emt/train_istanet.py --n_epochs 50
-
-Saves to: emt/weights/istanet_emt_ep{epoch:03d}_psnr{psnr:.2f}.pth
-"""
-
 import argparse, sys, copy
 from pathlib import Path
 
@@ -37,7 +24,7 @@ def train(args):
         batch_size = args.batch_size,
     )
 
-    A_np     = load_sensitivity_matrix(EMT_DATASET_DIR)   # (64, 4096)
+    A_np     = load_sensitivity_matrix(EMT_DATASET_DIR)
     A_tensor = torch.tensor(A_np, dtype=torch.float32)
     print(f"A shape: {A_np.shape}")
 

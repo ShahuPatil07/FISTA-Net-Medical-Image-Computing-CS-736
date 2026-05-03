@@ -1,18 +1,3 @@
-"""
-emt/evaluate_all.py
-===================
-Evaluate ALL EMT methods on the test set and save results.
-
-Methods:
-  Lap.Reg | FISTA-TV | ISTA-Net | FBPConvNet | FISTA-Net
-
-Usage
------
-    python emt/evaluate_all.py                        # test_set1 (default)
-    python emt/evaluate_all.py --test_split test2     # test_set2
-    python emt/evaluate_all.py --fista path/to/ckpt.pth
-"""
-
 import argparse, sys
 from pathlib import Path
 
@@ -32,10 +17,6 @@ from shared.models  import FISTANet, ISTANet, FBPConvNet
 from shared.metrics import (compute_metrics, print_results_table,
                              save_results_csv, save_results_summary_csv)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Checkpoint helpers
-# ─────────────────────────────────────────────────────────────────────────────
 
 def find_best_checkpoint(weights_dir: Path, prefix: str) -> Path:
     candidates = sorted(weights_dir.glob(f"{prefix}_emt_*.pth"))
@@ -72,10 +53,6 @@ def load_fbpconvnet(ckpt_path, device):
     return model
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Evaluation
-# ─────────────────────────────────────────────────────────────────────────────
-
 def evaluate_all(fista_model, ista_model, fbpc_model,
                  test_loader, A_np, L_np, img_size, device):
     methods = ["Lap.Reg", "FISTA-TV", "ISTA-Net", "FBPConvNet", "FISTA-Net"]
@@ -84,7 +61,6 @@ def evaluate_all(fista_model, ista_model, fbpc_model,
     for b_batch, x0_batch, gt_batch in tqdm(test_loader, desc="Evaluating EMT"):
         gt_np = gt_batch.squeeze(1).numpy()
         b_np  = b_batch.numpy()
-        x0_np = x0_batch.squeeze(1).numpy()
 
         for i in range(b_batch.shape[0]):
             b_i  = b_np[i]; gt_i = gt_np[i]
@@ -113,10 +89,6 @@ def evaluate_all(fista_model, ista_model, fbpc_model,
     return res
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Figure
-# ─────────────────────────────────────────────────────────────────────────────
-
 def save_emt_comparison_figure(display_rows, save_path):
     methods   = ["Lap.Reg", "FISTA-TV", "ISTA-Net", "FBPConvNet", "FISTA-Net", "GT"]
     N, M      = len(display_rows), len(methods)
@@ -143,10 +115,6 @@ def save_emt_comparison_figure(display_rows, save_path):
     plt.close()
     print(f"Saved → {save_path}")
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Main
-# ─────────────────────────────────────────────────────────────────────────────
 
 def run(args):
     device = DEVICE
@@ -187,7 +155,6 @@ def run(args):
     save_results_summary_csv(results,
                      EMT_RESULTS_DIR / "tables" / f"emt_{tag}_summary.csv")
 
-    # Collect display samples
     display_rows = []
     with torch.no_grad():
         for b_batch, x0_batch, gt_batch in test_loader:
