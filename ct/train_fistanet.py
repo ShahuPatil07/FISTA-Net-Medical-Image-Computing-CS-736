@@ -24,7 +24,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config          import CT, FISTA_NET, TRAIN, DEVICE, CT_WEIGHTS_DIR, CT_DATA_DIR, BOX_TOKEN, weight_name
+from config          import CT, FISTA_NET, TRAIN, DEVICE, CT_WEIGHTS_DIR, CT_DATA_DIR, weight_name
 from ct.dataset      import build_ct_loaders, RadonOperator
 from shared.models   import FISTANet
 from shared.metrics  import compute_metrics
@@ -88,7 +88,7 @@ def train(args):
     print(f"LR net/params: {args.lr_net} / {args.lr_params}")
 
     # ── Data ──────────────────────────────────────────────────────────────────
-    token = args.box_token or BOX_TOKEN or None
+    token = args.box_token or CT["box_token"] or None
     train_loader, val_loader, _ = build_ct_loaders(
         box_token   = token,
         data_root   = CT_DATA_DIR,

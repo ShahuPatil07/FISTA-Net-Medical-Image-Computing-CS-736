@@ -8,7 +8,8 @@ Methods:
 
 Usage
 -----
-    python emt/evaluate_all.py
+    python emt/evaluate_all.py                        # test_set1 (default)
+    python emt/evaluate_all.py --test_split test2     # test_set2
     python emt/evaluate_all.py --fista path/to/ckpt.pth
 """
 
@@ -23,17 +24,17 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config          import (EMT, FISTA_NET, ISTA_NET, FBPCONVNET, CLASSICAL, EVAL,
-                              DEVICE, EMT_WEIGHTS_DIR, EMT_RESULTS_DIR, EMT_DATA_DIR)
-from emt.dataset     import build_emt_loaders, load_sensitivity_matrix
-from emt.baselines   import laplacian_regularization, fista_tv_emt
-from shared.models   import FISTANet, ISTANet, FBPConvNet
-from shared.metrics  import (compute_metrics, print_results_table,
-                              save_results_csv, save_results_summary_csv)
+from config         import (EMT, FISTA_NET, ISTA_NET, FBPCONVNET, CLASSICAL, EVAL,
+                             DEVICE, EMT_WEIGHTS_DIR, EMT_RESULTS_DIR, EMT_DATASET_DIR)
+from emt.dataset    import build_emt_loaders, load_sensitivity_matrix, load_laplacian
+from emt.baselines  import laplacian_regularization, fista_tv_emt
+from shared.models  import FISTANet, ISTANet, FBPConvNet
+from shared.metrics import (compute_metrics, print_results_table,
+                             save_results_csv, save_results_summary_csv)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Checkpoint helpers (same pattern as CT)
+# Checkpoint helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
 def find_best_checkpoint(weights_dir: Path, prefix: str) -> Path:
@@ -75,26 +76,27 @@ def load_fbpconvnet(ckpt_path, device):
 # Evaluation
 # ─────────────────────────────────────────────────────────────────────────────
 
-def evaluate_all(fista_model, ista_model, fbpc_model, test_loader, A_np, img_size, device):
+def evaluate_all(fista_model, ista_model, fbpc_model,
+                 test_loader, A_np, L_np, img_size, device):
     methods = ["Lap.Reg", "FISTA-TV", "ISTA-Net", "FBPConvNet", "FISTA-Net"]
     res     = {m: {"PSNR": [], "SSIM": [], "RMSE": []} for m in methods}
 
-    for b_batch, gt_batch in tqdm(test_loader, desc="Evaluating EMT"):
+    for b_batch, x0_batch, gt_batch in tqdm(test_loader, desc="Evaluating EMT"):
         gt_np = gt_batch.squeeze(1).numpy()
         b_np  = b_batch.numpy()
+        x0_np = x0_batch.squeeze(1).numpy()
 
         for i in range(b_batch.shape[0]):
             b_i  = b_np[i]; gt_i = gt_np[i]
-            # Classical baselines (per-sample numpy)
-            x_lap = laplacian_regularization(b_i, A_np, img_size)
-            x_tv  = fista_tv_emt(b_i, A_np, x_lap, img_size)
+            x_lap = laplacian_regularization(b_i, A_np, L_np)
+            x_tv  = fista_tv_emt(b_i, A_np, x_lap)
             for name, pred in [("Lap.Reg", x_lap), ("FISTA-TV", x_tv)]:
                 m = compute_metrics(pred, gt_i)
                 for k in ("PSNR", "SSIM", "RMSE"):
                     res[name][k].append(m[k])
 
         b_t  = b_batch.to(device)
-        x0_t = torch.zeros_like(gt_batch).to(device)
+        x0_t = x0_batch.to(device)
 
         with torch.no_grad():
             ista_out,  _ = ista_model(b_t, x0_t)
@@ -112,12 +114,12 @@ def evaluate_all(fista_model, ista_model, fbpc_model, test_loader, A_np, img_siz
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Figures
+# Figure
 # ─────────────────────────────────────────────────────────────────────────────
 
 def save_emt_comparison_figure(display_rows, save_path):
-    methods = ["Lap.Reg", "FISTA-TV", "ISTA-Net", "FBPConvNet", "FISTA-Net", "GT"]
-    N, M    = len(display_rows), len(methods)
+    methods   = ["Lap.Reg", "FISTA-TV", "ISTA-Net", "FBPConvNet", "FISTA-Net", "GT"]
+    N, M      = len(display_rows), len(methods)
     fig, axes = plt.subplots(N, M, figsize=(3.5 * M, 3.5 * N))
     if N == 1: axes = axes[np.newaxis, :]
 
@@ -152,11 +154,18 @@ def run(args):
     (EMT_RESULTS_DIR / "figures").mkdir(exist_ok=True)
     (EMT_RESULTS_DIR / "tables").mkdir(exist_ok=True)
 
-    _, _, test_loader = build_emt_loaders(EMT_DATA_DIR, batch_size=EMT["batch_size"])
+    print(f"Test split: {args.test_split}")
+    _, _, test_loader = build_emt_loaders(
+        data_dir    = EMT_DATASET_DIR,
+        batch_size  = EMT["batch_size"],
+        test_split  = args.test_split,
+    )
 
-    A_np     = load_sensitivity_matrix(EMT_DATA_DIR)
+    A_np     = load_sensitivity_matrix(EMT_DATASET_DIR)
+    L_np     = load_laplacian(EMT_DATASET_DIR)
     A_tensor = torch.tensor(A_np, dtype=torch.float32)
     img_size = EMT["img_size"]
+    print(f"A: {A_np.shape}  L: {L_np.shape}")
 
     print("\nLoading model checkpoints …")
     fista_ckpt = Path(args.fista) if args.fista else find_best_checkpoint(EMT_WEIGHTS_DIR, "fistanet")
@@ -169,46 +178,61 @@ def run(args):
 
     print("\nRunning evaluation …")
     results = evaluate_all(fista_model, ista_model, fbpc_model,
-                           test_loader, A_np, img_size, device)
+                           test_loader, A_np, L_np, img_size, device)
 
-    print_results_table(results, title="EMT Reconstruction Comparison (FEM-based)")
-    save_results_csv(results,         EMT_RESULTS_DIR / "tables" / "emt_per_sample.csv")
-    save_results_summary_csv(results, EMT_RESULTS_DIR / "tables" / "emt_summary.csv")
+    tag = args.test_split
+    print_results_table(results, title=f"EMT Reconstruction ({tag})")
+    save_results_csv(results,
+                     EMT_RESULTS_DIR / "tables" / f"emt_{tag}_per_sample.csv")
+    save_results_summary_csv(results,
+                     EMT_RESULTS_DIR / "tables" / f"emt_{tag}_summary.csv")
 
     # Collect display samples
     display_rows = []
     with torch.no_grad():
-        for b_batch, gt_batch in test_loader:
+        for b_batch, x0_batch, gt_batch in test_loader:
             if len(display_rows) >= args.n_display: break
-            b_np  = b_batch.numpy(); gt_np = gt_batch.squeeze(1).numpy()
+            b_np  = b_batch.numpy()
+            gt_np = gt_batch.squeeze(1).numpy()
             b_t   = b_batch.to(device)
-            x0_t  = torch.zeros_like(gt_batch).to(device)
+            x0_t  = x0_batch.to(device)
             fista_pred = fista_model(b_t, x0_t)[0].squeeze(1).cpu().numpy()
             ista_pred  = ista_model( b_t, x0_t)[0].squeeze(1).cpu().numpy()
             fbpc_pred  = fbpc_model(x0_t).squeeze(1).cpu().numpy()
             for i in range(b_batch.shape[0]):
                 if len(display_rows) >= args.n_display: break
-                b_i  = b_np[i]; gt_i = gt_np[i]
-                x_lap = laplacian_regularization(b_i, A_np, img_size)
-                x_tv  = fista_tv_emt(b_i, A_np, x_lap, img_size)
-                row = {"Lap.Reg": x_lap, "FISTA-TV": x_tv,
-                       "ISTA-Net": ista_pred[i], "FBPConvNet": fbpc_pred[i],
-                       "FISTA-Net": fista_pred[i], "GT": gt_i}
+                b_i   = b_np[i]; gt_i = gt_np[i]
+                x_lap = laplacian_regularization(b_i, A_np, L_np)
+                x_tv  = fista_tv_emt(b_i, A_np, x_lap)
+                row = {
+                    "Lap.Reg":    x_lap,
+                    "FISTA-TV":   x_tv,
+                    "ISTA-Net":   ista_pred[i],
+                    "FBPConvNet": fbpc_pred[i],
+                    "FISTA-Net":  fista_pred[i],
+                    "GT":         gt_i,
+                }
                 row["metrics"] = {m: compute_metrics(row[m], gt_i)
                                    for m in ["Lap.Reg","FISTA-TV","ISTA-Net","FBPConvNet","FISTA-Net"]}
                 display_rows.append(row)
 
     fig_dir = EMT_RESULTS_DIR / "figures"
-    save_emt_comparison_figure(display_rows, fig_dir / "emt_comparison_all_methods.png")
+    save_emt_comparison_figure(
+        display_rows,
+        fig_dir / f"emt_comparison_{tag}.png",
+    )
     print(f"\nAll results saved to {EMT_RESULTS_DIR}")
 
 
 def parse_args():
     p = argparse.ArgumentParser(description="Evaluate all EMT methods")
-    p.add_argument("--fista",     type=str, default=None)
-    p.add_argument("--ista",      type=str, default=None)
-    p.add_argument("--fbpc",      type=str, default=None)
-    p.add_argument("--n_display", type=int, default=EVAL["n_display"])
+    p.add_argument("--fista",       type=str, default=None)
+    p.add_argument("--ista",        type=str, default=None)
+    p.add_argument("--fbpc",        type=str, default=None)
+    p.add_argument("--test_split",  type=str, default="test1",
+                   choices=["test1", "test2"],
+                   help="Which test set to evaluate on (test1 or test2)")
+    p.add_argument("--n_display",   type=int, default=EVAL["n_display"])
     return p.parse_args()
 
 

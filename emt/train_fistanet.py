@@ -1,17 +1,15 @@
 """
 emt/train_fistanet.py
 =====================
-Train FISTA-Net on the FEM-generated EMT dataset.
+Train FISTA-Net on the pre-generated EMT dataset.
 
 Usage
 -----
     python emt/train_fistanet.py
-    python emt/train_fistanet.py --n_epochs 50 --noise_db 20
+    python emt/train_fistanet.py --n_epochs 50 --lr_net 5e-5
 
 Saves checkpoints to:
     emt/weights/fistanet_emt_ep{epoch:03d}_psnr{psnr:.2f}.pth
-
-NOTE: Run emt/generate_data.py first to create the HDF5 dataset.
 """
 
 import argparse, sys, copy
@@ -24,10 +22,10 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config          import EMT, FISTA_NET, TRAIN, DEVICE, EMT_WEIGHTS_DIR, EMT_DATA_DIR, weight_name
-from emt.dataset     import build_emt_loaders, load_sensitivity_matrix
-from shared.models   import FISTANet
-from shared.metrics  import compute_metrics
+from config        import EMT, FISTA_NET, TRAIN, DEVICE, EMT_WEIGHTS_DIR, EMT_DATASET_DIR, weight_name
+from emt.dataset   import build_emt_loaders, load_sensitivity_matrix
+from shared.models import FISTANet
+from shared.metrics import compute_metrics
 
 
 def fista_net_loss(x_final, intermediates, x_gt, prox_net,
@@ -48,19 +46,17 @@ def train(args):
 
     print(f"Device  : {device}")
     print(f"Epochs  : {args.n_epochs}")
+    print(f"LR net/params: {args.lr_net} / {args.lr_params}")
 
-    # ── Data ──────────────────────────────────────────────────────────────────
     train_loader, val_loader, _ = build_emt_loaders(
-        data_dir   = EMT_DATA_DIR,
+        data_dir   = EMT_DATASET_DIR,
         batch_size = args.batch_size,
     )
 
-    # ── Sensitivity matrix A ──────────────────────────────────────────────────
-    A_np     = load_sensitivity_matrix(EMT_DATA_DIR)
+    A_np     = load_sensitivity_matrix(EMT_DATASET_DIR)   # (64, 4096)
     A_tensor = torch.tensor(A_np, dtype=torch.float32)
-    print(f"A shape  : {A_np.shape}")
+    print(f"A shape : {A_np.shape}")
 
-    # ── Model ─────────────────────────────────────────────────────────────────
     model = FISTANet(
         A_matrix   = A_tensor,
         n_stages   = FISTA_NET["n_stages"],
@@ -75,15 +71,14 @@ def train(args):
          "lr": args.lr_params},
     ])
 
-    history    = {"train_loss": [], "val_psnr": []}
-    best_psnr  = -float("inf")
+    history   = {"train_loss": [], "val_psnr": []}
+    best_psnr = -float("inf")
     best_state = None
 
     for epoch in range(1, args.n_epochs + 1):
         model.train(); ep_loss = 0.0
-        for b, x_gt in tqdm(train_loader, desc=f"Epoch {epoch}/{args.n_epochs}", leave=False):
-            b, x_gt = b.to(device), x_gt.to(device)
-            x0      = torch.zeros_like(x_gt)
+        for b, x0, x_gt in tqdm(train_loader, desc=f"Epoch {epoch}/{args.n_epochs}", leave=False):
+            b, x0, x_gt = b.to(device), x0.to(device), x_gt.to(device)
             x_final, ints = model(b, x0)
             loss, *_ = fista_net_loss(x_final, ints, x_gt, model.prox_net,
                                       args.lambda1, args.lambda2)
@@ -93,9 +88,9 @@ def train(args):
 
         model.eval(); val_psnrs = []
         with torch.no_grad():
-            for b, x_gt in val_loader:
-                b, x_gt = b.to(device), x_gt.to(device)
-                x_final, _ = model(b, torch.zeros_like(x_gt))
+            for b, x0, x_gt in val_loader:
+                b, x0, x_gt = b.to(device), x0.to(device), x_gt.to(device)
+                x_final, _ = model(b, x0)
                 for p, g in zip(x_final.squeeze(1).cpu().numpy(),
                                 x_gt.squeeze(1).cpu().numpy()):
                     val_psnrs.append(compute_metrics(p, g)["PSNR"])

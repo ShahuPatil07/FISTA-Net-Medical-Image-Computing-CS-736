@@ -17,26 +17,20 @@ import torch
 # ─────────────────────────────────────────────────────────────────────────────
 ROOT_DIR = Path(__file__).parent.resolve()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# BOX TOKEN  (regenerate every 60 min at developer.box.com)
-# Only needed on first run per split — individual slices are cached after that.
-# Leave empty ("") if data is already on disk at CT_DATA_DIR.
-# ─────────────────────────────────────────────────────────────────────────────
-BOX_TOKEN = ""   # ← paste your token here, or pass --box_token on the CLI
-
 # CT ─────────────────────────────────────────────────────────────────────────
 # Used by MayoCTDataset (local-disk mode).
-# Ignored when BOX_TOKEN is set (BoxCTDataset caches to ct_cache/slices/).
+# Ignored when CT["box_token"] is set (BoxCTDataset caches to ct_cache/slices/).
 CT_DATA_DIR    = ROOT_DIR / "ct_cache" / "full_3mm" / "full_3mm"
 CT_WEIGHTS_DIR = ROOT_DIR / "ct" / "weights"
 CT_RESULTS_DIR = ROOT_DIR / "ct" / "results"
 
 # EMT ────────────────────────────────────────────────────────────────────────
-# After running emt/generate_data.py, HDF5 files land here:
-#   EMT_DATA_DIR / emt_train.h5
-#   EMT_DATA_DIR / emt_test.h5
-#   EMT_DATA_DIR / sensitivity_matrix_A.npy  … etc.
-EMT_DATA_DIR   = ROOT_DIR / "emt" / "data"
+# Pre-generated dataset (.pt files) live here:
+#   EMT_DATASET_DIR / train.pt, val.pt, test_set1.pt, test_set2.pt
+#   EMT_DATASET_DIR / sensitivity_matrix_A.npy  (64 × 4096, pixel-space)
+#   EMT_DATASET_DIR / laplacian_matrix_L.npy    (4096 × 4096)
+EMT_DATASET_DIR = ROOT_DIR / "emt" / "FISTA_Net_EMT_Dataset"
+EMT_DATA_DIR    = EMT_DATASET_DIR   # backward-compat alias
 EMT_WEIGHTS_DIR = ROOT_DIR / "emt" / "weights"
 EMT_RESULTS_DIR = ROOT_DIR / "emt" / "results"
 
@@ -49,22 +43,30 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # CT — DATA  (Section IV-B of paper)
 # ─────────────────────────────────────────────────────────────────────────────
 CT = dict(
+    # ── Box streaming (no full zip download) ────────────────────────────────
+    # Paste your Box developer token here (regenerate every 60 min at
+    # developer.box.com).  Only needed until slices are cached locally.
+    # Leave "" to use local disk mode (data_root = CT_DATA_DIR above).
+    # Override per-run: python ct/train_fistanet.py --box_token YOUR_TOKEN
+    box_token = "KQnlIGH3cXOisdXBGMh59ZgacfiVSm9c",
+
     # Mayo Clinic patients split (paper uses 10 patients total)
     train_patients = ["L067", "L096", "L109", "L143", "L192", "L286", "L291", "L310"],
     val_patients   = ["L333"],
     test_patients  = ["L506"],
 
-    # Slices per patient (set None to use all)
-    slices_per_patient_train = 30,
-    slices_per_patient_val   = 10,
-    slices_per_patient_test  = 10,
+    # Slices per patient used for training/val/test
+    # (paper trains on limited slices for speed — full dataset has 500+ per patient)
+    slices_per_patient_train = 30,   # 30 × 8 patients = 240 train slices
+    slices_per_patient_val   = 10,   # 10 × 1 = 10 val slices
+    slices_per_patient_test  = 10,   # 10 × 1 = 10 test slices
 
     # Sparse-view CT settings (paper: 60 equi-spaced views)
     n_views    = 60,
 
-    # Full DICOM slice is 512×512; we train on crops to fit VRAM
+    # Full DICOM slice is 512×512; we train on random crops to fit VRAM
     image_size = 512,
-    patch_size = 128,   # training crop; set None to use full slice
+    patch_size = 128,   # training crop size; test always uses full 512×512
 
     # HU windowing → maps to [0, 1]
     win_min = -140,
@@ -80,13 +82,14 @@ CT = dict(
 # EMT — DATA  (Section IV-A of paper)
 # ─────────────────────────────────────────────────────────────────────────────
 EMT = dict(
-    # FEM mesh / physics
-    n_coils    = 8,
-    mesh_h0    = 0.04,   # element size — smaller = finer = slower
-    dist_exc   = 1,      # adjacent electrode excitation
+    # FEM system (matches FISTA_Net_EMT_Dataset_FEM.ipynb)
+    n_coils    = 8,       # electrodes on boundary
+    n_meas     = 64,      # total measurements (8 excitations × 8 per excitation)
+    mesh_h0    = 0.04,
+    dist_exc   = 1,
 
     # Image output
-    img_size   = 64,
+    img_size   = 64,      # 64×64 pixel grid
     domain_r   = 0.90,
 
     # Conductivity (S/m)
@@ -95,9 +98,15 @@ EMT = dict(
     obj_r_min  = 0.12,
     obj_r_max  = 0.28,
 
-    # Dataset sizes (paper uses ~2000 train)
-    n_train    = 1000,
-    n_test     = 200,
+    # Dataset sizes (from pre-generated .pt files)
+    n_train    = 1920,
+    n_val      = 480,
+    n_test     = 1200,    # per test set (test_set1 and test_set2)
+
+    # Subset of training data to use (None = full dataset).
+    # 640 = 1/3 of 1920 → ~40 min/model → ~2 hr for all 3 models on CPU.
+    # Val/test splits are always evaluated in full regardless of this setting.
+    train_subset = 640,
 
     # Noise levels tested in paper: 20, 30, 40 dB
     noise_db   = 30,
@@ -105,6 +114,7 @@ EMT = dict(
     # DataLoader
     batch_size  = 16,
     num_workers = 2,
+    pin_memory  = True,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -115,13 +125,12 @@ FISTA_NET = dict(
     n_filters = 32,   # channels in ProximalMappingNetwork
 
     # Scalar parameter initialisations (paper Section III-C)
-    # These are log-space initialisations fed through softplus
-    init_w1 = -0.5,   # step-size μ
-    init_c1 = -2.0,
-    init_w2 = -0.2,   # threshold θ
-    init_c2 = -1.0,
-    init_w3 =  1.0,   # momentum ρ
-    init_c3 =  0.0,
+    init_w1 = -0.2,   # step-size μ   (w_μ  in paper)
+    init_c1 =  0.1,   #               (b_μ  in paper)
+    init_w2 = -0.5,   # threshold θ   (w_θ  in paper)
+    init_c2 = -2.0,   #               (b_θ  in paper)
+    init_w3 =  0.5,   # momentum ρ    (w_ρ  in paper)
+    init_c3 =  0.0,   #               (b_ρ  in paper)
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -146,12 +155,12 @@ FBPCONVNET = dict(
 # ─────────────────────────────────────────────────────────────────────────────
 TRAIN = dict(
     # CT
-    n_epochs_ct   = 10,
+    n_epochs_ct   = 20,
     lr_net_ct     = 1e-4,   # ProxNet / U-Net learning rate
     lr_params_ct  = 1e-3,   # FISTA-Net scalar params (μ, θ, ρ) learning rate
 
     # EMT
-    n_epochs_emt  = 100,
+    n_epochs_emt  = 50,
     lr_net_emt    = 1e-4,
     lr_params_emt = 1e-3,
 

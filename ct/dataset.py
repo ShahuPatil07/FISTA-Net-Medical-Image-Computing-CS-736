@@ -160,13 +160,23 @@ class BoxCTDataset(Dataset):
 
     def __init__(
         self,
-        box_token:          str,
+        box_token:          str  = None,
         patients:           list = CT["train_patients"],
         slices_per_patient: int  = CT["slices_per_patient_train"],
         n_views:            int  = CT["n_views"],
         patch_size:         int  = CT["patch_size"],
         cache_dir:          Path = None,
     ):
+        if box_token is None:
+            box_token = CT["box_token"]
+        if not box_token:
+            raise RuntimeError(
+                "\nBox token not set.\n"
+                "Open config.py and set:  CT['box_token'] = 'your_token'\n"
+                "Regenerate at https://developer.box.com  (expires every 60 min).\n"
+                "After editing config.py, restart the Jupyter kernel and re-run."
+            )
+
         self.n_views    = n_views
         self.patch_size = patch_size
         self.samples    = []
@@ -324,12 +334,12 @@ def build_ct_loaders(
     """
     Returns (train_loader, val_loader, test_loader).
 
-    If box_token is provided, uses BoxCTDataset (streams from Box, caches
-    individual slices locally — no full zip download).
-
-    If box_token is None, falls back to MayoCTDataset which reads from
-    data_root on disk.
+    box_token: if None, auto-reads CT["box_token"] from config.py.
+    If config token is also empty, falls back to MayoCTDataset (local disk).
     """
+    if box_token is None:
+        box_token = CT["box_token"] or None
+
     def _make(patients, spp, ps):
         if box_token:
             return BoxCTDataset(

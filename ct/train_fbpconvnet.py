@@ -23,7 +23,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config          import CT, FBPCONVNET, TRAIN, DEVICE, CT_WEIGHTS_DIR, CT_DATA_DIR, BOX_TOKEN, weight_name
+from config          import CT, FBPCONVNET, TRAIN, DEVICE, CT_WEIGHTS_DIR, CT_DATA_DIR, weight_name
 from ct.dataset      import build_ct_loaders
 from shared.models   import FBPConvNet
 from shared.metrics  import compute_metrics
@@ -36,15 +36,16 @@ def train(args):
 
     print(f"Device : {device}")
     print(f"Epochs : {args.n_epochs}")
-    print(f"LR     : {args.lr}")
+    print(f"LR     : {args.lr_net}")
 
-    token = args.box_token or BOX_TOKEN or None
+    token = args.box_token or CT["box_token"] or None
     train_loader, val_loader, _ = build_ct_loaders(
-        box_token  = token,
-        data_root  = CT_DATA_DIR,
-        n_views    = args.n_views,
-        patch_size = args.patch_size,
-        batch_size = args.batch_size,
+        box_token   = token,
+        data_root   = CT_DATA_DIR,
+        n_views     = args.n_views,
+        patch_size  = args.patch_size,
+        batch_size  = args.batch_size,
+        num_workers = CT["num_workers"],
     )
 
     os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
@@ -52,7 +53,7 @@ def train(args):
     model = FBPConvNet(base_ch=FBPCONVNET["base_ch"]).to(device)
     print(f"FBPConvNet params: {model.n_parameters():,}")
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr_net)
 
     history    = {"train_loss": [], "val_psnr": []}
     best_psnr  = -float("inf")
@@ -106,7 +107,7 @@ def train(args):
 def parse_args():
     p = argparse.ArgumentParser(description="Train FBPConvNet on Mayo Clinic CT")
     p.add_argument("--n_epochs",   type=int,   default=TRAIN["n_epochs_ct"])
-    p.add_argument("--lr",         type=float, default=TRAIN["lr_net_ct"])
+    p.add_argument("--lr_net",     type=float, default=TRAIN["lr_net_ct"])
     p.add_argument("--n_views",    type=int,   default=CT["n_views"])
     p.add_argument("--batch_size", type=int,   default=CT["batch_size"])
     p.add_argument("--patch_size", type=int,   default=CT["patch_size"])

@@ -36,9 +36,9 @@ CS 736/
 │       ├── 01_CT_EDA.ipynb      ← Data exploration & visualisation
 │       └── 02_CT_Evaluate_All.ipynb  ← Interactive evaluation after training
 │
-└── emt/                         ← Everything EMT (⚠ WORK IN PROGRESS)
-    ├── generate_data.py         ← FEM-based dataset generation (pyeit)
-    ├── dataset.py               ← EMTDataset (HDF5 loader), build_emt_loaders
+└── emt/                         ← Everything EMT
+    ├── FISTA_Net_EMT_Dataset/   ← Pre-generated .pt dataset files
+    ├── dataset.py               ← EMTDataset (.pt loader), build_emt_loaders
     ├── baselines.py             ← laplacian_regularization, fista_tv_emt
     ├── train_fistanet.py        ← Train FISTA-Net on EMT
     ├── train_istanet.py         ← Train ISTA-Net  on EMT
@@ -49,7 +49,6 @@ CS 736/
     │   ├── figures/
     │   └── tables/
     └── notebooks/
-        ├── 00_EMT_DataGen.ipynb ← Interactive data generation
         └── 01_EMT_EDA.ipynb     ← EMT data exploration
 ```
 
@@ -140,36 +139,18 @@ jupyter notebook ct/notebooks/02_CT_Evaluate_All.ipynb
 
 ---
 
-## EMT Workflow (Section IV-A) — ⚠ Work in Progress
+## EMT Workflow (Section IV-A)
 
-> Dataset creation (mesh resolution, noise levels, number of samples) is still
-> being refined.  Do not mix with CT experiments.
+Pre-generated dataset (`.pt` files) is in `emt/FISTA_Net_EMT_Dataset/`.
+No data generation step is needed.
 
-### 1. Generate Data
-
-```bash
-python emt/generate_data.py                  # uses config.py defaults
-python emt/generate_data.py --n_train 2000   # paper uses ~2000 samples
-python emt/generate_data.py --noise_db 20    # test different SNR levels
-```
-
-Requires `pyeit` and `h5py`:
-```bash
-pip install pyeit h5py
-```
-
-Or use the interactive notebook:
-```bash
-jupyter notebook emt/notebooks/00_EMT_DataGen.ipynb
-```
-
-### 2. EDA
+### 1. EDA
 
 ```bash
 jupyter notebook emt/notebooks/01_EMT_EDA.ipynb
 ```
 
-### 3. Train
+### 2. Train
 
 ```bash
 python emt/train_fistanet.py
@@ -230,8 +211,6 @@ emt/weights/fistanet_emt_ep100_psnr22.34.pth ← FISTA-Net EMT epoch 100
 
 ```bash
 pip install torch torchvision numpy matplotlib scikit-image scipy tqdm pydicom
-# For EMT only:
-pip install pyeit h5py
 ```
 
 ---

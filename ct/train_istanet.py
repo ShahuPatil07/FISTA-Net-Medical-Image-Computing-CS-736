@@ -22,7 +22,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config          import CT, ISTA_NET, TRAIN, DEVICE, CT_WEIGHTS_DIR, CT_DATA_DIR, BOX_TOKEN, weight_name
+from config          import CT, ISTA_NET, TRAIN, DEVICE, CT_WEIGHTS_DIR, CT_DATA_DIR, weight_name
 from ct.dataset      import build_ct_loaders, RadonOperator
 from ct.train_fistanet import fista_net_loss
 from shared.models   import ISTANet
@@ -56,13 +56,14 @@ def train(args):
     print(f"Patch size: {eff_size}×{eff_size}")
     print(f"Epochs    : {args.n_epochs}")
 
-    token = args.box_token or BOX_TOKEN or None
+    token = args.box_token or CT["box_token"] or None
     train_loader, val_loader, _ = build_ct_loaders(
-        box_token  = token,
-        data_root  = CT_DATA_DIR,
-        n_views    = args.n_views,
-        patch_size = args.patch_size,
-        batch_size = args.batch_size,
+        box_token   = token,
+        data_root   = CT_DATA_DIR,
+        n_views     = args.n_views,
+        patch_size  = args.patch_size,
+        batch_size  = args.batch_size,
+        num_workers = CT["num_workers"],
     )
 
     os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"

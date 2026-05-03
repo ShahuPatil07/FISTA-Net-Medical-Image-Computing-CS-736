@@ -37,7 +37,7 @@ class ProximalMappingNetwork(nn.Module):
         super().__init__()
         Nf = n_filters
         self.encoder = nn.Sequential(
-            nn.Conv2d(1,  Nf, 3, padding=1, bias=False), nn.ReLU(inplace=True),
+            nn.Conv2d(1,  Nf, 3, padding=1, bias=False),                           # conv_D: projection, no activation
             nn.Conv2d(Nf, Nf, 3, padding=1, bias=False), nn.ReLU(inplace=True),
             nn.Conv2d(Nf, Nf, 3, padding=1, bias=False), nn.ReLU(inplace=True),
             nn.Conv2d(Nf, Nf, 3, padding=1, bias=False), nn.ReLU(inplace=True),
@@ -69,8 +69,8 @@ class ProximalMappingNetwork(nn.Module):
         """
         z        = self.encode(r)
         z_thresh = F.relu(z - theta) - F.relu(-z - theta)   # soft-threshold
-        x_out    = self.decode(z_thresh) + r                 # skip connection
-        return x_out, z
+        x_out    = F.relu(self.decode(z_thresh) + r)         # skip + non-negativity
+        return x_out, z_thresh                               # post-threshold z for L_spa
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -115,8 +115,7 @@ class FISTANet(nn.Module):
     # ------------------------------------------------------------------
     @staticmethod
     def _compute_W_tilde(A: torch.Tensor) -> torch.Tensor:
-        A = A.float()
-        return (A / A.norm(dim=0, keepdim=True).clamp(min=1e-8)).T
+        return A.float().T
 
     def _mu(self, k: int) -> torch.Tensor:
         return F.softplus(-F.softplus(-self.w1) * k + self.c1)

@@ -46,9 +46,11 @@ def find_best_checkpoint(weights_dir: Path, prefix: str) -> Path:
     """Find the checkpoint with highest PSNR for a given model prefix."""
     candidates = sorted(weights_dir.glob(f"{prefix}_ct_*.pth"))
     if not candidates:
+        script = {"fistanet": "train_fistanet", "istanet": "train_istanet",
+                  "fbpconvnet": "train_fbpconvnet"}.get(prefix, f"train_{prefix}")
         raise FileNotFoundError(
             f"No checkpoint found for '{prefix}' in {weights_dir}.\n"
-            f"Run ct/train_{prefix.replace('net','net').replace('fbpconv','fbpconvnet')}.py first."
+            f"Run  python ct/{script}.py  first."
         )
     # Parse psnr from filename: {model}_ct_ep{epoch}_psnr{xx.xx}.pth
     def psnr_from_name(p: Path) -> float:
@@ -277,7 +279,9 @@ def run(args):
     (CT_RESULTS_DIR / "tables").mkdir(exist_ok=True)
 
     # ── Test loader (full slices, batch=1) ────────────────────────────────────
+    token = args.box_token or CT["box_token"] or None
     _, _, test_loader = build_ct_loaders(
+        box_token  = token,
         data_root  = CT_DATA_DIR,
         n_views    = args.n_views,
         patch_size = None,
@@ -371,6 +375,8 @@ def parse_args():
     p.add_argument("--n_views",         type=int,   default=CT["n_views"])
     p.add_argument("--n_display",       type=int,   default=EVAL["n_display"])
     p.add_argument("--fista_tv_iters",  type=int,   default=CLASSICAL["fista_tv_ct_iters"])
+    p.add_argument("--box_token",       type=str,   default="",
+                   help="Box developer token (uses cached slices if already fetched)")
     return p.parse_args()
 
 
